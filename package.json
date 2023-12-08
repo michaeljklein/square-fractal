@@ -1,0 +1,25 @@
+{
+  "name": "square-fractal",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "type": "npx tsc",
+    "build": "npx webpack --config webpack.config.js",
+    "build_tsc": " npx tsc --build",
+    "clean": "npx tsc --build --clean"
+  },
+  "author": "Michael J. Klein",
+  "license": "MIT",
+  "devDependencies": {
+    "html-webpack-plugin": "^5.5.4",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "@svgdotjs/svg.js": "^3.2.0"
+  }
+}
