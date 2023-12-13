@@ -29,5 +29,7 @@ module.exports = {
 
   plugins: [new HtmlWebpackPlugin({
     hash: true,
+    minify: true,
+    title: "Square Fractal: Refresh for New",
   })],
 };

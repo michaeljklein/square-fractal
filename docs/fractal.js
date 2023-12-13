@@ -72,23 +72,30 @@ import { SVG, Point, PointArray } from '@svgdotjs/svg.js';
 // - done queue (triangle | square | ~rhombus)
 //
 // finally, render triangle|square|rhombus -> SVG
-function midpoint(xs, ys) {
-    return new Point({
-        x: (xs.x + ys.x) / 2,
-        y: (xs.y + ys.y) / 2,
-    });
-}
 var Shape = /** @class */ (function () {
     function Shape() {
     }
+    Shape.prototype.midpoint = function (xs, ys) {
+        if (this.midpoint_weight) {
+            return new Point({
+                x: this.midpoint_weight * xs.x + (1 - this.midpoint_weight) * ys.x,
+                y: this.midpoint_weight * xs.y + (1 - this.midpoint_weight) * ys.y,
+            });
+        }
+        else {
+            return new Point({
+                x: (xs.x + ys.x) / 2,
+                y: (xs.y + ys.y) / 2,
+            });
+        }
+    };
     Shape.prototype.render_pointarray = function () {
         return new PointArray(this.render().flatMap(function (pt) { return [pt.x, pt.y]; }));
     };
     // returns the number of sub-shapes drawn
-    Shape.prototype.fractalize = function (max_depth, pixel_size, stroke_width
-    // border_pixels: number, // TODO ?
-    ) {
-        var draw = SVG().addTo('body').size(pixel_size, pixel_size);
+    Shape.prototype.fractalize = function (max_depth, pixel_size, pixel_size_height, // if not null, the height, else pixel_size is the height
+    stroke_width, uniform_weights) {
+        var draw = SVG().addTo('body').size(pixel_size, pixel_size_height || pixel_size);
         draw.polyline(this.render_pointarray()).fill('none').stroke({ color: '#000', width: stroke_width });
         // [shape, depth]
         var num_sub_shapes = 0;
@@ -99,9 +106,9 @@ var Shape = /** @class */ (function () {
             draw.polyline(current_shape.render_pointarray()).fill('none').stroke({ color: '#000', width: stroke_width });
             if (current_depth <= max_depth) {
                 var next_random_num = crypto.getRandomValues(new Uint32Array(1))[0] / Math.pow(2, 32);
-                var max = current_shape.step_options();
+                var max = current_shape.step_options(uniform_weights);
                 var next_step_index = Math.floor(next_random_num * max);
-                unfinished_shapes.push.apply(unfinished_shapes, current_shape.next_step(next_step_index).map(function (x) {
+                unfinished_shapes.push.apply(unfinished_shapes, current_shape.next_step(next_step_index, uniform_weights).map(function (x) {
                     var ret = [x, current_depth + 1];
                     return ret;
                 }));
@@ -116,11 +123,12 @@ var Shape = /** @class */ (function () {
 }());
 var Triangle = /** @class */ (function (_super) {
     __extends(Triangle, _super);
-    function Triangle(pt0, pt1, pt2) {
+    function Triangle(pt0, pt1, pt2, midpoint_weight) {
         var _this = _super.call(this) || this;
         _this.pt0 = pt0;
         _this.pt1 = pt1;
         _this.pt2 = pt2;
+        _this.midpoint_weight = midpoint_weight;
         return _this;
     }
     Triangle.prototype.render = function () {
@@ -147,13 +155,13 @@ var Triangle = /** @class */ (function (_super) {
         var pt0 = this.pt0;
         var pt1 = this.pt1;
         var pt2 = this.pt2;
-        var pt01 = midpoint(pt0, pt1);
-        var pt12 = midpoint(pt1, pt2);
-        var pt20 = midpoint(pt2, pt0);
-        var triangle_A = new Triangle(pt0, pt01, pt20);
-        var triangle_B = new Triangle(pt01, pt1, pt12);
-        var triangle_C = new Triangle(pt20, pt12, pt2);
-        var triangle_M = new Triangle(pt01, pt12, pt20);
+        var pt01 = this.midpoint(pt0, pt1);
+        var pt12 = this.midpoint(pt1, pt2);
+        var pt20 = this.midpoint(pt2, pt0);
+        var triangle_A = new Triangle(pt0, pt01, pt20, this.midpoint_weight);
+        var triangle_B = new Triangle(pt01, pt1, pt12, this.midpoint_weight);
+        var triangle_C = new Triangle(pt20, pt12, pt2, this.midpoint_weight);
+        var triangle_M = new Triangle(pt01, pt12, pt20, this.midpoint_weight);
         return [
             triangle_A,
             triangle_B,
@@ -178,51 +186,82 @@ var Triangle = /** @class */ (function (_super) {
         var pt0 = this.pt0;
         var pt1 = this.pt1;
         var pt2 = this.pt2;
-        var pt01 = midpoint(pt0, pt1);
-        var pt12 = midpoint(pt1, pt2);
-        var pt20 = midpoint(pt2, pt0);
-        var pt201 = midpoint(pt01, pt20);
-        var triangle_A = new Triangle(pt0, pt01, pt20);
-        var quadrilateral_B = new Quadrilateral(pt201, pt01, pt1, pt12);
-        var quadrilateral_C = new Quadrilateral(pt20, pt201, pt12, pt2);
+        var pt01 = this.midpoint(pt0, pt1);
+        var pt12 = this.midpoint(pt1, pt2);
+        var pt20 = this.midpoint(pt2, pt0);
+        var pt201 = this.midpoint(pt01, pt20);
+        var triangle_A = new Triangle(pt0, pt01, pt20, this.midpoint_weight);
+        var quadrilateral_B = new Quadrilateral(pt201, pt01, pt1, pt12, this.midpoint_weight);
+        var quadrilateral_C = new Quadrilateral(pt20, pt201, pt12, pt2, this.midpoint_weight);
         return [
             triangle_A,
             quadrilateral_B,
             quadrilateral_C
         ];
     };
-    Triangle.prototype.step_options = function () {
-        return 5;
+    Triangle.prototype.step_options = function (uniform_weights) {
+        if (uniform_weights) {
+            return 5;
+        }
+        else {
+            return 9;
+        }
     };
-    Triangle.prototype.next_step = function (index) {
-        switch (index) {
-            case 0:
-                return this.trisect();
-            case 1:
-                return this.t_split();
-            case 2:
-                this.rotate();
-                return this.t_split();
-            case 3:
-                this.rotate();
-                this.rotate();
-                return this.t_split();
-            case 4:
-                return [];
-            default:
-                throw new Error('next_step: index out of range');
+    Triangle.prototype.next_step = function (index, uniform_weights) {
+        if (uniform_weights) {
+            switch (index) {
+                case 0:
+                    return this.trisect();
+                case 1:
+                    return this.t_split();
+                case 2:
+                    this.rotate();
+                    return this.t_split();
+                case 3:
+                    this.rotate();
+                    this.rotate();
+                    return this.t_split();
+                case 4:
+                    return [];
+                default:
+                    throw new Error('next_step: index out of range');
+            }
+        }
+        else {
+            switch (index) {
+                case 0:
+                case 1:
+                case 2:
+                    return this.trisect();
+                case 3:
+                    return this.t_split();
+                case 4:
+                    this.rotate();
+                    return this.t_split();
+                case 5:
+                    this.rotate();
+                    this.rotate();
+                    return this.t_split();
+                case 6:
+                case 7:
+                case 8:
+                    return [];
+                default:
+                    throw new Error('next_step: index out of range');
+            }
         }
     };
     return Triangle;
 }(Shape));
 var Quadrilateral = /** @class */ (function (_super) {
     __extends(Quadrilateral, _super);
-    function Quadrilateral(pt0, pt1, pt2, pt3) {
+    function Quadrilateral(pt0, pt1, pt2, pt3, midpoint_weight) {
         var _this = _super.call(this) || this;
         _this.pt0 = pt0;
         _this.pt1 = pt1;
         _this.pt2 = pt2;
         _this.pt3 = pt3;
+        _this.midpoint_weight = midpoint_weight;
         return _this;
     }
     Quadrilateral.prototype.render = function () {
@@ -232,10 +271,10 @@ var Quadrilateral = /** @class */ (function (_super) {
         var points = [this.pt0, this.pt1, this.pt2, this.pt3];
         this.pt1 = points[0], this.pt2 = points[1], this.pt3 = points[2], this.pt0 = points[3];
     };
-    Quadrilateral.prototype.step_options = function () {
+    Quadrilateral.prototype.step_options = function (uniform_weights) {
         return 1;
     };
-    Quadrilateral.prototype.next_step = function (index) {
+    Quadrilateral.prototype.next_step = function (index, uniform_weights) {
         switch (index) {
             case 0:
                 return [];
@@ -273,15 +312,15 @@ var Square = /** @class */ (function (_super) {
         var pt1 = this.pt1;
         var pt2 = this.pt2;
         var pt3 = this.pt3;
-        var pt01 = midpoint(this.pt0, this.pt1);
-        var pt12 = midpoint(this.pt1, this.pt2);
-        var pt23 = midpoint(this.pt2, this.pt3);
-        var pt30 = midpoint(this.pt3, this.pt0);
-        var triangle_A = new Triangle(pt0, pt01, pt30);
-        var triangle_B = new Triangle(pt01, pt1, pt12);
-        var triangle_C = new Triangle(pt12, pt2, pt23);
-        var triangle_D = new Triangle(pt30, pt23, pt3);
-        var square_M = new Square(pt01, pt12, pt23, pt30);
+        var pt01 = this.midpoint(this.pt0, this.pt1);
+        var pt12 = this.midpoint(this.pt1, this.pt2);
+        var pt23 = this.midpoint(this.pt2, this.pt3);
+        var pt30 = this.midpoint(this.pt3, this.pt0);
+        var triangle_A = new Triangle(pt0, pt01, pt30, this.midpoint_weight);
+        var triangle_B = new Triangle(pt01, pt1, pt12, this.midpoint_weight);
+        var triangle_C = new Triangle(pt12, pt2, pt23, this.midpoint_weight);
+        var triangle_D = new Triangle(pt30, pt23, pt3, this.midpoint_weight);
+        var square_M = new Square(pt01, pt12, pt23, pt30, this.midpoint_weight);
         return [
             triangle_A,
             triangle_B,
@@ -313,44 +352,61 @@ var Square = /** @class */ (function (_super) {
         var pt1 = this.pt1;
         var pt2 = this.pt2;
         var pt3 = this.pt3;
-        var triangle_A = new Triangle(pt0, pt1, pt2);
-        var triangle_B = new Triangle(pt0, pt2, pt3);
+        var triangle_A = new Triangle(pt0, pt1, pt2, this.midpoint_weight);
+        var triangle_B = new Triangle(pt0, pt2, pt3, this.midpoint_weight);
         return [
             triangle_A,
             triangle_B
         ];
     };
-    Square.prototype.step_options = function () {
-        return 4;
+    Square.prototype.step_options = function (uniform_weights) {
+        if (uniform_weights) {
+            return 4;
+        }
+        else {
+            return 6;
+        }
     };
-    Square.prototype.next_step = function (index) {
-        switch (index) {
-            case 0:
-                return this.quadsect();
-            case 1:
-                return this.bisect();
-            case 2:
-                this.rotate();
-                return this.bisect();
-            case 3:
-                return [];
-            default:
-                throw new Error('next_step: index out of range');
+    Square.prototype.next_step = function (index, uniform_weights) {
+        if (uniform_weights) {
+            switch (index) {
+                case 0:
+                    return this.quadsect();
+                case 1:
+                    return this.bisect();
+                case 2:
+                    this.rotate();
+                    return this.bisect();
+                case 3:
+                    return [];
+                default:
+                    throw new Error('next_step: index out of range');
+            }
+        }
+        else {
+            switch (index) {
+                case 0:
+                case 1:
+                    return this.quadsect();
+                case 2:
+                    return this.bisect();
+                case 3:
+                    this.rotate();
+                    return this.bisect();
+                case 4:
+                case 5:
+                    return [];
+                default:
+                    throw new Error('next_step: index out of range');
+            }
         }
     };
     return Square;
 }(Quadrilateral));
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        var pixel_size, pt0, pt1, pt2, pt3, fractal_seed, url_params, max_depth, stroke_width, num_shapes;
+        var url_params, max_depth, stroke_width, midpoint_weight, uniform_weights, rectangular_seed, pixel_size, pt0, pt1, pt2, pt3, pixel_size_height, pt0, pt1, pt2, pt3, fractal_seed, num_shapes;
         return __generator(this, function (_a) {
-            pixel_size = Math.min(window.innerHeight, window.innerWidth);
-            console.log('pixel size:', pixel_size);
-            pt0 = new Point({ x: 0, y: pixel_size });
-            pt1 = new Point({ x: pixel_size, y: pixel_size });
-            pt2 = new Point({ x: pixel_size, y: 0 });
-            pt3 = new Point({ x: 0, y: 0 });
-            fractal_seed = new Square(pt0, pt1, pt2, pt3);
             url_params = new URLSearchParams(window.location.search);
             max_depth = Number(url_params.get('depth'));
             if (!max_depth) {
@@ -360,13 +416,38 @@ function main() {
             if (!stroke_width) {
                 stroke_width = 3;
             }
-            num_shapes = fractal_seed.fractalize(max_depth, pixel_size, stroke_width);
+            midpoint_weight = Number(url_params.get('midpoint'));
+            uniform_weights = url_params.get('uniform') == 't';
+            rectangular_seed = url_params.get('rectangular') == 't';
+            console.log('max_depth:', max_depth);
+            console.log('stroke_width:', stroke_width);
+            console.log('midpoint_weight:', midpoint_weight);
+            console.log('uniform_weights:', uniform_weights);
+            console.log('rectangular_seed:', rectangular_seed);
+            pixel_size = Math.min(window.innerHeight, window.innerWidth);
+            console.log('pixel size:', pixel_size);
+            pt0 = new Point({ x: 0, y: pixel_size });
+            pt1 = new Point({ x: pixel_size, y: pixel_size });
+            pt2 = new Point({ x: pixel_size, y: 0 });
+            pt3 = new Point({ x: 0, y: 0 });
+            pixel_size_height = null;
+            if (rectangular_seed) {
+                pixel_size = window.innerWidth;
+                pixel_size_height = window.innerHeight;
+                pt0 = new Point({ x: 0, y: pixel_size_height });
+                pt1 = new Point({ x: pixel_size, y: pixel_size_height });
+                pt2 = new Point({ x: pixel_size, y: 0 });
+                pt3 = new Point({ x: 0, y: 0 });
+            }
+            fractal_seed = new Square(pt0, pt1, pt2, pt3, midpoint_weight);
+            num_shapes = fractal_seed.fractalize(max_depth, pixel_size, pixel_size_height, stroke_width, uniform_weights);
             console.log('num_shapes', num_shapes);
             while (num_shapes < 2) {
+                console.log('regenerating to ensure num_shapes >= 2..');
                 // remove previous SVG
                 document.body.removeChild(document.body.children[0]);
                 // re-generate
-                num_shapes = fractal_seed.fractalize(max_depth, pixel_size, stroke_width);
+                num_shapes = fractal_seed.fractalize(max_depth, pixel_size, pixel_size_height, stroke_width, uniform_weights);
                 console.log('num_shapes', num_shapes);
             }
             return [2 /*return*/];
